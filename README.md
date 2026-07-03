@@ -56,7 +56,7 @@ It is the DNS foundation for a self-hosted Nextcloud stack and local services.
 This Pi-hole stack:
 
 - Provides DNS and DHCP for my LAN.
-- Serves local DNS records such as `nextcloud.home.arpa` and `dunirvgou.cloud`.
+- Serves local DNS records such as `nextcloud.home.arpa` and `example.cloud`.
 - Is the first layer in the home lab, ensuring that Nextcloud and other services are reachable by friendly hostnames.
 
 ## Future work
