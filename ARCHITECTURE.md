@@ -1,9 +1,17 @@
 # Home Lab DNS Architecture
 
+## Repository layout
+
+- `nextcloud/` – Nextcloud AIO and Caddy reverse-proxy configuration.
+- `pihole/` – Pi-hole Docker Compose file, `.env.example` template, and deployment guide (`PIHOLE_DEPLOYMENT.md`).
+- `ARCHITECTURE.md` – This high-level architecture document.
+- `README.md` – Overview and quick-start instructions for the stack.
+- `update.sh` – Update script for the Pi-hole stack.
+
 ## Components
 
 - Pi-hole (this repository): core DNS, DHCP, and ad-blocking.
-- Nextcloud stack (separate repository): application layer, served via Caddy.
+- Nextcloud stack (under `nextcloud/`): application layer, served via Caddy.
 - ISP router: WAN and Wi‑Fi entry point, DHCP disabled in favour of Pi-hole.
 - Client devices: laptops, desktops, phones, tablets on the home network.
 
@@ -26,28 +34,28 @@
                              │
                              │
                     ┌────────▼────────┐
-                    │ ISP Router      │
-                    │ (Wi‑Fi + WAN)   │
+                    │ ISP Router       │
+                    │ (Wi‑Fi + WAN)    │
                     └────────┬────────┘
                              │
-                DHCP OFF  ┌──┴───────────────┐
-                          │                  │
-                          │   LAN / Wi‑Fi    │
-                          │                  │
-                          └──┬───────────────┘
+                DHCP OFF   ┌─┴───────────────┐
+                           │                 │
+                           │    LAN / Wi‑Fi  │
+                           │                 │
+                           └─┬───────────────┘
                              │
                 ┌────────────▼────────────┐
-                │        Pi‑hole         │
-                │ (DNS + DHCP + Ads)     │
-                │ Docker on Ubuntu host  │
+                │        Pi‑hole          │
+                │ (DNS + DHCP + Ads)      │
+                │ Docker on Ubuntu host   │
                 └────────┬───────────────┘
                          │
-          DNS: nextcloud.home.arpa, dunirvgou.cloud, etc.
+      DNS: nextcloud.home.arpa, dunirvgou.cloud, etc.
                          │
                 ┌────────▼────────────┐
-                │   Caddy + Nextcloud │
-                │   (same Ubuntu host)│
-                │   Reverse proxy      │
+                │  Caddy + Nextcloud  │
+                │  (same Ubuntu host) │
+                │  Reverse proxy      │
                 └────────┬────────────┘
                          │
                 ┌────────▼────────────┐
