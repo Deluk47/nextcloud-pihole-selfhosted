@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  caddy:
+    image: caddy:alpine
+    restart: always
+    container_name: caddy
+    network_mode: "host"
+    volumes:
+      - caddy_certs:/certs
+      - caddy_config:/config
+      - caddy_data:/data
+      - caddy_sites:/srv
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+volumes:
+  caddy_certs:
+  caddy_config:
+  caddy_data:
+  caddy_sites:

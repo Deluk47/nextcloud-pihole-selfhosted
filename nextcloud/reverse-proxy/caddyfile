@@ -1,0 +1,4 @@
+dunirvgou.cloud {
+    # Use the LAN IP so Caddy can find the AIO container on the host
+    reverse_proxy 192.168.0.28:11000
+}

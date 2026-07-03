@@ -1,0 +1,17 @@
+https://dunirvgou.cloud:443 {
+    tls internal
+
+    # High-performance backend signaling
+    handle_path /standalone-signaling/* {
+        reverse_proxy 127.0.0.1:3479 {
+            flush_interval -1
+        }
+    }
+
+    # Collabora
+    reverse_proxy /cool/* 127.0.0.1:11000
+
+    # Everything else to Nextcloud AIO Apache
+    reverse_proxy 127.0.0.1:11000
+}
+
