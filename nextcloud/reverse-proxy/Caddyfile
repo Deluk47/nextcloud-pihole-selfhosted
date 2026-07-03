@@ -1,4 +1,4 @@
-https://dunirvgou.cloud:443 {
+https://{$NEXTCLOUD_DOMAIN}:443 {
     tls internal
 
     # High-performance backend signaling
@@ -14,4 +14,3 @@ https://dunirvgou.cloud:443 {
     # Everything else to Nextcloud AIO Apache
     reverse_proxy 127.0.0.1:11000
 }
-

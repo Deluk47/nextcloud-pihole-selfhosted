@@ -12,7 +12,7 @@ It is the DNS foundation for a self-hosted Nextcloud stack and local services.
 - Pi-hole deployed via Docker Compose
 - Configuration via `.env` for secrets (admin/API password)
 - Local DNS records for Nextcloud and internal services
-- Designed to work with a locked ISP router (Virgin Media) using Pi-hole DHCP
+- Designed to work with a locked ISP router using Pi-hole DHCP
 
 ## Tech stack
 
@@ -30,9 +30,10 @@ It is the DNS foundation for a self-hosted Nextcloud stack and local services.
    cd nextcloud-pihole-selfhosted
    ```
 
-2. Create a `.env` file from `.env.example`:
+2. Go to the Pi-hole folder and create a `.env` file from `.env.example`:
 
    ```bash
+   cd pihole
    cp .env.example .env
    # Edit .env and set FTLCONF_webserver_api_password and TZ
    ```
@@ -45,11 +46,15 @@ It is the DNS foundation for a self-hosted Nextcloud stack and local services.
 
 4. Configure your router or Pi-hole DHCP to use Pi-hole as DNS.
 
+For more detailed steps, see [pihole/PIHOLE_DEPLOYMENT.md](pihole/PIHOLE_DEPLOYMENT.md).
+
 ## Repository layout
 
-- `compose.yaml` – Docker Compose for Pi-hole.
-- `.env.example` – Example environment variables (no secrets).
-- `.gitignore` – Ignores `.env` and other local files.
+- `nextcloud/` – Nextcloud AIO and reverse-proxy configuration.
+- `pihole/` – Pi-hole Docker Compose, `.env.example`, and deployment guide.
+- `ARCHITECTURE.md` – High-level architecture of the home lab stack.
+- `README.md` – This overview and quick-start guide.
+- `update.sh` – Update script for the Pi-hole stack.
 
 ## Role in the home lab
 
@@ -61,7 +66,6 @@ This Pi-hole stack:
 
 ## Future work
 
-- Add Nextcloud stack in a separate repository (`nextcloud-stack`).
+- Add more detailed Nextcloud deployment docs under `nextcloud/`.
 - Add infra documentation repo (`infra`) describing full home lab architecture.
 - Integrate monitoring (Netdata, Uptime Kuma) and CI checks.
-

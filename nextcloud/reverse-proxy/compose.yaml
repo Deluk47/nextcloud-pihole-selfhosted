@@ -6,6 +6,11 @@ services:
     restart: always
     container_name: caddy
     network_mode: "host"
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
     volumes:
       - caddy_certs:/certs
       - caddy_config:/config

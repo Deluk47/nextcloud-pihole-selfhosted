@@ -4,20 +4,28 @@ services:
     init: true
     restart: always
     container_name: nextcloud-aio-mastercontainer
+
     volumes:
       - nextcloud_aio_mastercontainer:/mnt/docker-aio-config
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
     ports:
       - "8080:8080"
+
+    env_file:
+      - .env
+
     environment:
-      - APACHE_PORT=11000
-      - APACHE_IP_BINDING=127.0.0.1
-      - SKIP_DOMAIN_VALIDATION=true
-      - TALK_PORT=3479
-      - COLLABORA_SECCOMP_DISABLED=true
-      - AIO_ADDITIONAL_HOSTS=dunirvgou.cloud:192.168.0.28
+      - APACHE_PORT=${APACHE_PORT}
+      - APACHE_IP_BINDING=${APACHE_IP_BINDING}
+      - SKIP_DOMAIN_VALIDATION=${SKIP_DOMAIN_VALIDATION}
+      - TALK_PORT=${TALK_PORT}
+      - COLLABORA_SECCOMP_DISABLED=${COLLABORA_SECCOMP_DISABLED}
+      - AIO_ADDITIONAL_HOSTS=${NEXTCLOUD_DOMAIN}:${NEXTCLOUD_HOST_IP}
+
     extra_hosts:
-      - "dunirvgou.cloud:192.168.0.28"
+      - "${NEXTCLOUD_DOMAIN}:${NEXTCLOUD_HOST_IP}"
+
     dns:
       - 1.1.1.1
       - 8.8.8.8
