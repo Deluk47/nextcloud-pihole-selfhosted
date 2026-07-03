@@ -51,6 +51,14 @@ It is the DNS foundation for a self-hosted Nextcloud stack and local services.
 - `.env.example` – Example environment variables (no secrets).
 - `.gitignore` – Ignores `.env` and other local files.
 
+## Role in the home lab
+
+This Pi-hole stack:
+
+- Provides DNS and DHCP for my LAN.
+- Serves local DNS records such as `nextcloud.home.arpa` and `dunirvgou.cloud`.
+- Is the first layer in the home lab, ensuring that Nextcloud and other services are reachable by friendly hostnames.
+
 ## Future work
 
 - Add Nextcloud stack in a separate repository (`nextcloud-stack`).
