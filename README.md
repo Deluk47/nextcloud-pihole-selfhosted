@@ -64,6 +64,51 @@ This Pi-hole stack:
 - Serves local DNS records such as `nextcloud.home.arpa` and `example.cloud`.
 - Is the first layer in the home lab, ensuring that Nextcloud and other services are reachable by friendly hostnames.
 
+## On a new machine
+
+To deploy this stack on another host:
+
+1. Clone the repository and enter it:
+
+   ```bash
+   cd ~
+   git clone https://github.com/Deluk47/nextcloud-pihole-selfhosted.git
+   cd nextcloud-pihole-selfhosted
+   ```
+
+2. Set up Pi-hole:
+
+   ```bash
+   cd pihole
+   cp .env.example .env
+   nano .env       # set TZ and FTLCONF_webserver_api_password
+   docker compose up -d
+   ```
+
+3. Set up Nextcloud AIO:
+
+   ```bash
+   cd ../nextcloud
+   cp .env.example .env
+   nano .env       # set NEXTCLOUD_DOMAIN and NEXTCLOUD_HOST_IP
+   docker compose up -d
+   ```
+
+4. Set up the Caddy reverse proxy:
+
+   ```bash
+   cd reverse-proxy
+   cp .env.example .env
+   nano .env       # set NEXTCLOUD_DOMAIN to match Nextcloud
+   docker compose up -d
+   ```
+
+5. Point clients and/or your router DNS to the Pi-hole host IP, and access Nextcloud at:
+
+   ```text
+   https://<YOURCLOUD.cloud>
+   ```
+
 ## Future work
 
 - Add more detailed Nextcloud deployment docs under `nextcloud/`.
