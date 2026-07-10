@@ -1,203 +1,341 @@
-# Pi-hole Deployment Guide (Self-Hosted Network)
+# Pi-hole Deployment Guide (Self-Hosted / Self-Contained Cloud)
 
-This guide describes how to deploy the Pi-hole DNS and ad-blocking stack defined in this repository on an Ubuntu Server host. Pi-hole acts as the DNS/DHCP layer for a self-hosted Nextcloud and other services.
+This guide describes how to deploy and verify Pi-hole on an Ubuntu Server host for a self-contained home cloud (including Nextcloud). Pi-hole runs in Docker bridge mode and provides DNS for your LAN, including a local record for `<YOUR_CLOUD_HOSTNAME>`. [web:74][web:164]
+
+> **Terminology:**  
+> - **Pi-hole host IP** = the LAN IP address of the machine running the Pi-hole container (for example `192.168.0.53`).  
+> - **\<YOUR_CLOUD_HOSTNAME\>** = the internal DNS name you will use for your cloud service (for example `cloud.home.arpa` or `nextcloud.home.arpa`).  
+> - LAN clients (like your jump host) must use the Pi-hole host IP as their DNS server.
+
+> **Choosing `<YOUR_CLOUD_HOSTNAME>` (best practice):**  
+> For purely internal services, use a **private, non-public** domain such as a subdomain of `home.arpa` (reserved for home networks) instead of a made-up public TLD. Examples: `cloud.home.arpa`, `nextcloud.home.arpa`, `files.home.arpa`. [web:74]
 
 ---
 
-## Prerequisites
+## 1. Free port 53 on the host
 
-- **OS**: Ubuntu Server (Debian-based).
-- **Firewall**: UFW (Uncomplicated Firewall) enabled.
-- **Containers**: Docker and Docker Compose installed.
-- **Repository layout**: This guide assumes the repo is checked out at `~/pihole`.
+Pi-hole must own port `53/tcp` and `53/udp` on the host. Disable any service already listening there (typically `systemd-resolved`). [web:146][web:147]
 
----
-
-## Step 1: DNS and system resolver considerations
-
-Pi-hole needs to bind to port `53` for DNS. If system services such as `systemd-resolved` are still listening on port `53`, container startup will fail.
-
-1. Check whether anything is bound to port 53:
+1. Check port 53 usage:
 
    ```bash
    sudo ss -tulpn | grep :53
    ```
 
-2. If you see `systemd-resolved` or another service binding `:53`, you can either:
-   - Configure `systemd-resolved` with `DNSStubListener=no` in `/etc/systemd/resolved.conf` and restart it, or
-   - Stop and disable `systemd-resolved` entirely if you prefer Pi-hole to own DNS on the host.
-
-   Example (disable completely):
+2. Stop and disable `systemd-resolved` if it appears:
 
    ```bash
    sudo systemctl stop systemd-resolved
    sudo systemctl disable systemd-resolved
+   sudo systemctl mask systemd-resolved
    ```
 
-3. Verify the port is free:
+3. Fix `/etc/resolv.conf` so it’s a normal file you can edit: [web:145]
 
    ```bash
-   sudo ss -tulpn | grep :53
+   ls -l /etc/resolv.conf
    ```
 
-   No output indicates that port `53` is now available.
+   If it is a symlink to `systemd-resolved`, remove and recreate it:
+
+   ```bash
+   sudo rm /etc/resolv.conf
+   sudo tee /etc/resolv.conf > /dev/null << 'EOF'
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOF
+   ```
+
+4. Confirm port 53 is now free:
+
+   ```bash
+   sudo ss -tulpn | grep :53 || echo "Port 53 free"
+   ```
 
 ---
 
-## Step 2: Configure UFW for DNS and web admin
+## 2. Configure UFW firewall
 
-Open required ports on the host firewall:
+Open only what Pi-hole and administration need, *before* starting the container. [web:79][web:81]
 
-```bash
-# DNS (53/TCP and 53/UDP)
-sudo ufw allow 53/tcp
-sudo ufw allow 53/udp
+1. Set default policy:
 
-# Pi-hole web admin (mapped from container port 80 to host 8081/8082)
-sudo ufw allow 8081/tcp
-sudo ufw allow 8082/tcp
+   ```bash
+   sudo ufw default deny incoming
+   sudo ufw default allow outgoing
+   ```
 
-sudo ufw reload
-```
+2. Allow SSH (admin):
 
-These rules allow clients to send DNS queries and you to access the web admin UI through the mapped HTTP ports.
+   ```bash
+   sudo ufw allow 22/tcp
+   ```
+
+3. Allow DNS:
+
+   ```bash
+   sudo ufw allow 53/tcp
+   sudo ufw allow 53/udp
+   ```
+
+4. Allow Pi-hole web UI (HTTP on 8080):
+
+   ```bash
+   sudo ufw allow 8080/tcp
+   ```
+
+5. Enable UFW and reload:
+
+   ```bash
+   sudo ufw enable
+   sudo ufw reload
+   sudo ufw status verbose
+   ```
 
 ---
 
-## Step 3: Prepare Pi-hole environment variables
+## 3. Prepare Pi-hole environment (.env)
 
-This repository uses `.env` for sensitive values.
+Use an environment file for timezone and Pi-hole web password. [web:39][web:164]
 
-1. Create `.env` from the example:
+1. Go to the Pi-hole folder:
 
    ```bash
-   cd ~/pihole
-   cp .env.example .env
+   cd ~/nextcloud-pihole-selfhosted/pihole
    ```
 
-2. Edit `.env` and set:
+2. Create `.env` (or copy from example):
+
+   ```bash
+   cp .env.example .env  # if .env.example exists
+   ```
+
+3. Edit `.env`:
+
+   ```bash
+   nano .env
+   ```
+
+   Example:
 
    ```bash
    TZ=Europe/London
-   FTLCONF_webserver_api_password=<YOUR_SECURE_PASSWORD>
+   FTLCONF_webserver_api_password=myhole12
    ```
 
-   Replace `<YOUR_SECURE_PASSWORD>` with a strong Pi-hole web/API password. The `.env` file is gitignored and not committed.
+4. Ensure `.env` is **not** committed:
+
+   ```bash
+   echo ".env" >> .gitignore
+   ```
 
 ---
 
-## Step 4: Review the Compose configuration
+## 4. Write / confirm `compose.yaml` (Docker bridge mode)
 
-The Pi-hole stack is defined in `compose.yaml`:
+Pi-hole runs in Docker’s default bridge network, with host ports mapped for DNS and web. [web:39][web:74]
 
 ```yaml
 services:
   pihole:
     container_name: pihole
     image: pihole/pihole:latest
+
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-      - "8082:80/tcp"
-      - "8081:80/tcp"
+      - "8080:80/tcp"
+      - "8443:443/tcp"
+
     env_file:
       - .env
+
     environment:
       - TZ=${TZ}
       - FTLCONF_webserver_api_password=${FTLCONF_webserver_api_password}
+      # Optional: widen listeningMode via env if needed
+      # - FTLCONF_dns_listeningMode=all
+
     volumes:
-      - './etc-pihole:/etc/pihole'
-      - './etc-dnsmasq.d:/etc/dnsmasq.d'
+      - "./etc-pihole:/etc/pihole"
+      - "./etc-dnsmasq.d:/etc/dnsmasq.d"
+
     dns:
-      - 127.0.0.1
-      - 1.1.1.1
+      - 8.8.8.8
+      - 8.8.4.4
+
     restart: unless-stopped
+
     cap_add:
       - NET_ADMIN
 ```
 
-- `etc-pihole` and `etc-dnsmasq.d` are bind mounts for Pi-hole configuration and DNS settings.
-- `cap_add: NET_ADMIN` is required for DHCP and advanced networking.
-
 ---
 
-## Step 5: Start and verify Pi-hole
+## 5. Start the Pi-hole container
 
-1. Start Pi-hole in detached mode:
+1. Start:
 
    ```bash
-   cd ~/pihole
+   cd ~/nextcloud-pihole-selfhosted/pihole
    docker compose up -d
    ```
 
-2. Check container status:
+2. Check container status and published ports:
 
    ```bash
-   docker ps
+   docker ps --filter "name=pihole" \
+     --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
    ```
 
-   The `pihole` container should report `Up` and, ideally, a healthy status.
+3. Get the container’s bridge IP (for host-only diagnostics):
 
-3. Access the web admin UI:
-
-   ```text
-   http://<YOUR_SERVER_IP>:8081/admin
+   ```bash
+   docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pihole
    ```
 
-   or, if you prefer the second mapping:
-
-   ```text
-   http://<YOUR_SERVER_IP>:8082/admin
-   ```
-
-   Log in using the password defined in `.env`.
+   Example: `172.18.0.2` (for host diagnostics only). [web:39]
 
 ---
 
-## Step 6: Configure DHCP and local DNS (optional but recommended)
+## 6. Configure Pi-hole DNS and listening behavior
 
-Once Pi-hole is running:
+Use the web UI on the Pi-hole host. [web:151][web:163]
 
-1. Decide whether Pi-hole will act as your DHCP server.
-2. If yes, disable DHCP on your ISP router and enable Pi-hole DHCP in the admin UI.
-3. Add local DNS records for internal services, such as:
-   - `nextcloud.home.arpa -> <Nextcloud/Caddy host IP>`
-   - `<YOURCLOUD.cloud> -> <Nextcloud/Caddy host IP>`
+1. In a browser, open:
 
-This makes client devices resolve your self-hosted services by name, using Pi-hole as the DNS source.
+   ```text
+   http://<PI-HOLE_HOST_IP>:8080/admin
+   ```
+
+2. **Upstream DNS Servers** (Settings → DNS):
+
+   - Enable **Custom**.
+   - Set:
+     - `8.8.8.8`
+     - `8.8.4.4`
+   - Disable other upstreams if you want only Google DNS. [web:151][web:155]
+
+3. **Interface listening behavior** (Settings → DNS):
+
+   - Select **Listen on all interfaces, permit all origins**.  
+     This allows LAN clients (including your jump host) to query Pi-hole when Pi-hole is running in Docker bridge mode. [web:163][web:175]
+
+4. Save.
 
 ---
 
-## Troubleshooting: Port 53 "address already in use"
+## 7. Add the local DNS record for your cloud
 
-If you see an error like:
+Create an internal DNS name for your cloud service, such as Nextcloud. [web:101][web:196]
 
-```text
-failed to bind host port 0.0.0.0:53/tcp: address already in use
-```
+1. In the Pi-hole admin UI, go to **Local DNS → DNS Records**.
+2. Add:
 
-then another service is still holding port 53.
+   - **Domain**: `<YOUR_CLOUD_HOSTNAME>`
+   - **IP**: `<PI-HOLE_HOST_IP>`
 
-1. Check the binding process:
+   Example:
 
-   ```bash
-   sudo ss -tulpn | grep :53
-   ```
+   - Domain: `cloud.home.arpa`
+   - IP: `192.168.0.53` (Pi-hole host IP)
 
-2. Stop or disable the conflicting service (typically `systemd-resolved`), as shown earlier.
+3. Save.
 
-3. Bring down the stack and restart:
+---
 
-   ```bash
-   docker compose down
-   docker compose up -d
-   ```
+## 8. Configure clients to use Pi-hole
 
-If the port is free and the container still fails, inspect logs with:
+Point clients (e.g. your jump host) at the Pi-hole host IP for DNS. [web:196][web:164]
+
+On the **jump host**:
 
 ```bash
-docker logs pihole
+sudo tee /etc/resolv.conf > /dev/null << 'EOF'
+nameserver <PI-HOLE_HOST_IP>
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOF
 ```
 
-for more details.
+Example:
 
+```bash
+nameserver 192.168.0.53
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+```
+
+---
+
+## 9. Sanity-check Pi-hole behavior
+
+### 9.1 On the Pi-hole host
+
+```bash
+dig @127.0.0.1 cloudflare.com
+dig @127.0.0.1 <YOUR_CLOUD_HOSTNAME>
+```
+
+Both should return `NOERROR`, and `<YOUR_CLOUD_HOSTNAME>` should resolve to your Pi-hole host IP. [web:194]
+
+### 9.2 From a LAN client (jump host)
+
+Verify the client is using Pi-hole:
+
+```bash
+cat /etc/resolv.conf
+# Should show: nameserver <PI-HOLE_HOST_IP>
+```
+
+Then:
+
+```bash
+dig @<PI-HOLE_HOST_IP> cloudflare.com
+dig @<PI-HOLE_HOST_IP> <YOUR_CLOUD_HOSTNAME>
+dig <YOUR_CLOUD_HOSTNAME>
+```
+
+Expected:
+
+- `cloudflare.com` returns valid A records.
+- `<YOUR_CLOUD_HOSTNAME>` returns `<PI-HOLE_HOST_IP>`.
+- The `SERVER:` line in `dig` output shows `<PI-HOLE_HOST_IP>#53`. [web:194][web:200]
+
+---
+
+## 10. Access Pi-hole web admin (final check)
+
+From any LAN client using Pi-hole:
+
+```text
+http://<PI-HOLE_HOST_IP>:8080/admin
+```
+
+Log in with the password from `.env`. Confirm:
+
+- You see DNS queries from your clients.
+- Requests for `<YOUR_CLOUD_HOSTNAME>` appear in query logs when you run `dig` or open the URL. [web:74][web:199]
+
+---
+
+## 11. Document settings in this repo
+
+After confirming everything works, commit the working configuration. [web:167]
+
+1. Ensure these files are correct:
+
+   - `pihole/compose.yaml`
+   - `pihole/PIHOLE_DEPLOYMENT.md` (this guide)
+   - `pihole/.gitignore` (includes `.env`)
+
+2. Commit and push:
+
+   ```bash
+   cd ~/nextcloud-pihole-selfhosted
+   git add pihole/compose.yaml pihole/PIHOLE_DEPLOYMENT.md pihole/.gitignore
+   git commit -m "Document working Pi-hole DNS and <YOUR_CLOUD_HOSTNAME> setup"
+   git push origin main
+   ```
+
+Next steps (in a separate Nextcloud guide) will be to start the Nextcloud container, add `<YOUR_CLOUD_HOSTNAME>` to `trusted_domains`, and configure your reverse proxy to serve that hostname. [web:184][web:185]
