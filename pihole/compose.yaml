@@ -6,13 +6,9 @@ services:
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-<<<<<<< Updated upstream
-      - "8080:80/tcp"
-      - "8443:443/tcp"
-=======
       - "8081:80/tcp"
       - "8444:443/tcp"
->>>>>>> Stashed changes
+
     env_file:
       - .env
 
