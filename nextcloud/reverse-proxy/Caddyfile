@@ -1,4 +1,8 @@
-https://{$NEXTCLOUD_DOMAIN}:443 {
+{
+    local_certs
+}
+
+nextcloud.local.cloud:443 {
     tls internal
 
     # High-performance backend signaling

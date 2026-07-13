@@ -1,3 +1,4 @@
-.env
-.env
+pihole/etc-pihole/
+pihole/etc-dnsmasq.d/
+nextcloud/volumes/
 .env
