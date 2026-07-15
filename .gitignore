@@ -1,20 +1,42 @@
-# Ignore all private environmental variables
-*.env
+# --------- Secrets and environment ---------
+# Ignore all .env files (real configs with secrets)
 .env
+**/.env
 .env.*
+*.env.local
+*.secret
+*secret*
+*secrets*
 
-# Ignore active configuration runtime data directories
-**/data/
-**/config/
-**/certs/
-**/srv/
+# --------- Docker runtime data (by service) ---------
+# Nextcloud / Caddy reverse proxy
+nextcloud/reverse-proxy/caddy_data/
+nextcloud/reverse-proxy/caddy_config/
+nextcloud/reverse-proxy/caddy_certs/
+nextcloud/reverse-proxy/caddy_sites/
 
-# Ignore system files
-.DS_Store
-*.log
-
-# Explicitly block active Pi-hole runtime data mounts
-**/etc-pihole/
-**/etc-dnsmasq.d/
+# Pi-hole runtime data
 pihole/etc-pihole/
 pihole/etc-dnsmasq.d/
+
+# --------- Local override / debug files ---------
+docker-compose.override.yml
+compose.override.yml
+docker-compose.*.local.yml
+
+# --------- Logs ---------
+*.log
+logs/
+
+# --------- Editors / IDEs ---------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --------- Misc system junk ---------
+**/__pycache__/
+*.pyc
