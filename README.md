@@ -1,46 +1,93 @@
 # nextcloud-pihole-selfhosted
 
-Self-hosted Pi-hole DNS and Nextcloud stack for a home lab on Ubuntu, orchestrated with Docker Compose.[web:46]
+Self-hosted Pi-hole DNS and Nextcloud stack for a home lab on a Linux host, orchestrated with Docker Compose.
 
 ## Overview
 
-This repository defines a reproducible, self-contained cloud environment built around Pi-hole for DNS/DHCP and Nextcloud for personal cloud storage and collaboration.[web:41]  
-Pi-hole is the DNS foundation of the stack: it serves local DNS records and ad-blocking for your LAN, while Nextcloud and a reverse proxy (such as Caddy) run alongside it on the same host or a dedicated node.[web:46][web:48]
+This repository defines a reproducible, self-contained cloud environment built around Pi-hole for DNS (and optional DHCP) and Nextcloud All-in-One (AIO) for personal cloud storage and collaboration.  
+Pi-hole provides DNS and ad-blocking for your LAN, while Nextcloud and a Caddy reverse proxy run alongside it on the same host.
 
 ### Key features
 
-- Pi-hole deployed via Docker Compose as the primary LAN DNS and optional DHCP.[web:46]  
-- Configuration via `.env` files for all secrets and host-specific values (Pi-hole admin/API password, Nextcloud domain, host IPs).[web:44]  
-- Local DNS records for Nextcloud and internal services (for example `nextcloud.home.arpa`, `example.cloud`).[web:48]  
-- Designed to work even when the ISP router is “locked” by using Pi-hole DHCP and per-client DNS overrides.[web:46]  
-- GitHub-tracked configuration and docs so the stack can be rebuilt consistently on new hosts.[web:41][web:44]
+- Pi-hole deployed via Docker Compose as the primary LAN DNS and optional DHCP.
+- Configuration via `.env` files for all secrets and host-specific values (Pi-hole admin/API password, Nextcloud domain, host IPs).
+- Local DNS records for Nextcloud and internal services (for example `your.cloud.name`).
+- Designed to work even when the ISP router is “locked” by using Pi-hole DHCP and per-client DNS overrides.
+- Git-tracked configuration and docs so the stack can be rebuilt consistently on new hosts.
 
 ## Architecture
 
-The project is split into focused components:[web:44]
+The project is split into focused components:
 
-- `pihole/` – Pi-hole Docker Compose stack, `.env.example`, and deployment guide.  
-- `nextcloud/` – Nextcloud AIO and related configuration (domain, host IP, volumes).  
-- `reverse-proxy/` – Reverse proxy (for example Caddy) that fronts Nextcloud and other services.  
-- `ARCHITECTURE.md` – High-level description of how Pi-hole, Nextcloud, and the reverse proxy fit together in the home lab.  
-- `update.sh` – Helper script for updating the Pi-hole stack on an existing host.  
+- `pihole/` – Pi-hole Docker Compose stack and `.env.example`.
+- `nextcloud/` – Nextcloud AIO and related configuration.
+- `nextcloud/reverse-proxy/` – Caddy reverse proxy that fronts Nextcloud (and optional services like Talk HPB and Collabora).
+- `update.sh` – Helper script for updating the Pi-hole stack on an existing host.
 
-Pi-hole is typically deployed first; once DNS is in place, Nextcloud and the reverse proxy use Pi-hole for name resolution and serve friendly hostnames to clients.[web:48]
+Pi-hole is typically deployed first; once DNS is in place, Nextcloud and the reverse proxy use Pi-hole for name resolution and serve friendly hostnames to clients.
+
+## Repository layout
+
+| Path                     | Description                                                              |
+|--------------------------|--------------------------------------------------------------------------|
+| `pihole/`                | Pi-hole Docker Compose stack and Pi-hole runtime volumes.               |
+| `nextcloud/`             | Nextcloud AIO configuration and supporting files.                       |
+| `nextcloud/reverse-proxy/` | Caddy reverse proxy configuration (`compose.yaml`, `Caddyfile`).     |
+| `README.md`              | Overview and quick-start guide (this file).                             |
+| `update.sh`              | Script to update the Pi-hole stack on an existing host.                 |
+
+## Architecture diagram
+
+```mermaid
+graph LR
+  subgraph LAN
+    Client1[Client 1]
+    Client2[Client 2]
+    Router[Router / Switch]
+  end
+
+  subgraph Host[Linux host running Docker]
+    PiHole[Pi-hole]
+    Caddy[Caddy]
+    NextcloudAIO[Nextcloud AIO]
+    TalkHPB[Talk HPB]
+    Collabora[Collabora]
+  end
+
+  %% Client traffic to router
+  Client1 --> Router
+  Client2 --> Router
+
+  %% DNS via Pi-hole
+  Router --> PiHole
+
+  %% HTTP(S) traffic through Caddy
+  Client1 --> Caddy
+  Client2 --> Caddy
+
+  %% Reverse proxy routes on the host
+  Caddy --> NextcloudAIO
+  Caddy --> TalkHPB
+  Caddy --> Collabora
+```
+
+This diagram shows LAN clients sending DNS queries through Pi-hole and HTTPS traffic through Caddy, which proxies to Nextcloud AIO, Talk HPB, and Collabora on the same host.
 
 ## Prerequisites
 
-On the target host (Ubuntu Server recommended):[web:46]
+On the target host (for example Ubuntu Server):
 
-- A user with `sudo` access.  
-- Docker Engine and Docker Compose installed from the official Docker packages.  
-- Basic familiarity with editing `.env` files and using `docker compose` on the CLI.  
+- A user with `sudo` access.
+- Docker Engine and Docker Compose installed.
+- A static **Host IP** on your LAN.
+- Basic familiarity with editing `.env` files and using `docker compose`.
 - A LAN where you can either:
-  - Set DNS to the Pi-hole host IP on the router, or  
-  - Use Pi-hole’s DHCP server and/or per-device DNS overrides.[web:46]
+  - Set DNS to the **Pi-hole IP** on the router, or  
+  - Use Pi-hole’s DHCP server and/or per-device DNS overrides.
 
 ## Quick start: Pi-hole only
 
-These steps bring up Pi-hole as DNS/DHCP and give you a working foundation for the rest of the stack.[web:46]
+These steps bring up Pi-hole as DNS/DHCP and give you a working foundation for the rest of the stack.
 
 1. Clone the repository and enter it:
 
@@ -54,11 +101,11 @@ These steps bring up Pi-hole as DNS/DHCP and give you a working foundation for t
    ```bash
    cd pihole
    cp .env.example .env
-   nano .env   # set TZ and FTLCONF_webserver_api_password
+   nano .env   # set TZ and FTLCONF_webserver_api_password (or WEBPASSWORD)
    ```
 
-   - `TZ` should match your timezone (for example `Europe/London`).  
-   - `FTLCONF_webserver_api_password` becomes your Pi-hole web UI password.[web:48]
+   - `TZ` should match your timezone (for example `Europe/London`).
+   - The Pi-hole password variable becomes your Pi-hole web UI password.
 
 3. Start Pi-hole with Docker Compose:
 
@@ -68,17 +115,19 @@ These steps bring up Pi-hole as DNS/DHCP and give you a working foundation for t
 
 4. Point clients to Pi-hole for DNS:
 
-   - Set the Pi-hole host IP as DNS on your router (if possible), or  
+   - Set the **Pi-hole IP** as DNS on your router, or  
    - Enable Pi-hole DHCP and point clients at Pi-hole for DNS, or  
-   - Manually configure DNS per client (IPv4 settings → DNS server = Pi-hole host IP).[web:46][web:48]
+   - Manually configure DNS per client (IPv4 settings → DNS server = **Pi-hole IP**).
 
-5. Log into the Pi-hole web UI and add local DNS records for your services (for example `nextcloud.home.arpa`, `example.cloud`).[web:48]
+5. Log into the Pi-hole web UI and add local DNS records for your services, such as:
 
-For more detailed deployment notes and troubleshooting steps, see [`pihole/PIHOLE_DEPLOYMENT.md`](https://github.com/Deluk47/nextcloud-pihole-selfhosted/blob/main/pihole/PIHOLE_DEPLOYMENT.md).[web:41]
+   ```text
+   your.cloud.name -> Host IP
+   ```
 
-## Full stack on a new host
+## Full stack: Pi-hole + Nextcloud + Caddy
 
-To build the full Pi-hole + Nextcloud + reverse proxy stack on a new machine, use this sequence.[web:41][web:44]
+To build the full stack on a new machine:
 
 1. Clone the repository:
 
@@ -93,151 +142,104 @@ To build the full Pi-hole + Nextcloud + reverse proxy stack on a new machine, us
    ```bash
    cd pihole
    cp .env.example .env
-   nano .env   # set TZ and FTLCONF_webserver_api_password
+   nano .env   # set TZ and Pi-hole password
    docker compose up -d
    ```
 
-3. Set up Nextcloud AIO:
+3. Set up Nextcloud AIO (follow official docs for the core AIO container), then configure `.env` in `nextcloud/` if you use one for host/domain values, for example:
 
    ```bash
    cd ../nextcloud
-   cp .env.example .env
-   nano .env   # set NEXTCLOUD_DOMAIN and NEXTCLOUD_HOST_IP
-   docker compose up -d
+   cp .env.example .env   # if present
+   nano .env              # set values like NEXTCLOUD_DOMAIN, Host IP, etc.
+   # start your Nextcloud AIO stack as documented in this folder
    ```
 
-   - `NEXTCLOUD_DOMAIN` must match the hostname you plan to use (for example `nextcloud.home.arpa` or `YOURCLOUD.cloud`).[web:37]  
-   - `NEXTCLOUD_HOST_IP` is the LAN IP of the host running Nextcloud.[web:48]
-
-4. Set up the reverse proxy (for example Caddy):
+4. Set up the Caddy reverse proxy:
 
    ```bash
-   cd ../reverse-proxy
-   cp .env.example .env
-   nano .env   # set NEXTCLOUD_DOMAIN to match Nextcloud
+   cd nextcloud/reverse-proxy
+   # ensure compose.yaml and Caddyfile match your ports and domain
    docker compose up -d
    ```
+
+   In the typical setup, Caddy:
+
+   - Listens on host ports 80 and 443.
+   - Serves `https://your.cloud.name` with an internal CA.
+   - Proxies:
+     - `/` → Nextcloud AIO Apache (e.g. `127.0.0.1:11000`)
+     - `/standalone-signaling/*` → Talk HPB (e.g. `127.0.0.1:3479`)
+     - `/cool/*` → Collabora (e.g. `127.0.0.1:9980`)
 
 5. Wire DNS to the cloud host:
 
-   - Ensure Pi-hole has a local DNS record that maps `NEXTCLOUD_DOMAIN` to `NEXTCLOUD_HOST_IP`.  
-   - Point clients or the router DNS to the Pi-hole host IP.[web:48]
+   - Ensure Pi-hole has a local DNS record that maps `your.cloud.name` to **Host IP**.
+   - Point your LAN devices (or router) to use **Pi-hole IP** for DNS.
 
-6. Access Nextcloud:
+6. Access Nextcloud from a LAN client:
 
    ```text
-   https://<YOURCLOUD.cloud>
+   https://your.cloud.name
    ```
 
-   Replace `YOURCLOUD.cloud` with the actual domain you set in `NEXTCLOUD_DOMAIN` and in Pi-hole’s local DNS.[web:37]
+## DNS notes
 
-## Repository layout
-
-| Path              | Description                                                                 |
-|-------------------|-----------------------------------------------------------------------------|
-| `pihole/`         | Pi-hole Docker Compose stack, `.env.example`, and Pi-hole deployment guide. |
-| `nextcloud/`      | Nextcloud AIO configuration and supporting files.                           |
-| `reverse-proxy/`  | Reverse proxy configuration (Caddy, etc.) for HTTPS and routing.           |
-| `ARCHITECTURE.md` | High-level architecture and design notes for the home lab.                 |
-| `README.md`       | Overview and quick-start guide (this file).                                |
-| `update.sh`       | Script to update the Pi-hole stack on an existing host.                    |
-
-
-## Architecture diagram
-
-```mermaid
-graph LR
-  subgraph LAN
-    Client1[Client 1]
-    Client2[Client 2]
-    Router[Router / Switch]
-  end
-
-  subgraph Host["Linux host (Docker)"]
-    PiHole[Pi-hole\nDNS / Ad-blocker]
-    Caddy[Caddy\nReverse Proxy]
-    NextcloudAIO[Nextcloud AIO\nApache + PHP]
-    TalkHPB[Nextcloud Talk HPB\n(standalone-signaling)]
-    Collabora[Collabora Online]
-  end
-
-  %% Client traffic
-  Client1 --> Router
-  Client2 --> Router
-  Router --> PiHole
-
-  %% DNS resolution
-  PiHole --> Router
-  Router --> Client1
-  Router --> Client2
-
-  %% HTTP(S) traffic
-  Client1 --> Caddy
-  Client2 --> Caddy
-
-  %% Reverse proxy routes
-  Caddy --> NextcloudAIO
-  Caddy --> TalkHPB
-  Caddy --> Collabora
-```
-
-This uses Mermaid’s `graph` syntax and will render on GitHub as an inline diagram showing your stack.[web:182][web:181]
-
-Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
-
----
-
-## 2. Stage, commit, and push
-
-```bash
-git add README.md
-git commit -m "docs: add architecture diagram with Mermaid"
-git push
-```
-
----
-
-## 3. Verify the diagram on GitHub
-
-Go to your repo page:
-
-```text
-https://github.com/Deluk47/nextcloud-pihole-selfhosted
-```
-
-GitHub will render the Mermaid block under “Architecture diagram” with a visual graph.[web:182][web:187]
-
-If you’d like, we can refine the diagram further (e.g., label ports, add Host IP / Pi-hole IP, or separate subgraphs for “internal-only” vs “exposed”) while keeping it readable.
-
-## Role in the home lab
-
-Within the wider home lab, this stack:[web:46]
-
-- Provides consistent DNS and DHCP for the LAN.  
-- Serves local DNS records such as `nextcloud.home.arpa` and `example.cloud`.  
-- Acts as the first layer that ensures all other services are reachable by stable, human-friendly hostnames.  
-- Can be replicated on a new host with minimal manual configuration by reusing `.env` files and Compose definitions.[web:41][web:44]
+- `your.cloud.name` should resolve to **Host IP** via:
+  - Pi-hole Local DNS Records, or  
+  - `/etc/hosts` entries on your clients, for example:
+    ```text
+    Host IP your.cloud.name
+    ```
+- For long-term stability, consider using a `.lan`, `.home`, or similar suffix (for example `cloud.lan`) instead of `.local`, which is reserved for mDNS on many systems.
 
 ## Environment files and configuration
 
-To keep secrets and host-specific details out of version control, each component uses `.env` files:[web:44]
+Each component uses `.env` files to keep secrets and host-specific details out of version control:
 
-- `pihole/.env` – Contains `TZ` and `FTLCONF_webserver_api_password` (and any other Pi-hole envs).  
-- `nextcloud/.env` – Contains `NEXTCLOUD_DOMAIN`, `NEXTCLOUD_HOST_IP`, and Nextcloud-specific settings.  
-- `reverse-proxy/.env` – Contains `NEXTCLOUD_DOMAIN` and proxy-specific variables.
+- `pihole/.env` – Contains `TZ`, Pi-hole password variables, and other Pi-hole envs.
+- `nextcloud/.env` – (Optional) Contains values like `NEXTCLOUD_DOMAIN`, host IP, etc.
+- `nextcloud/reverse-proxy/.env` – (Optional) Contains domain and proxy-specific variables.
 
-A matching `.env.example` is committed for each component with safe example values only. Copy `.env.example` to `.env` and edit locally before running `docker compose up -d`.[web:44]
+A matching `.env.example` is committed for each component with safe example values only.  
+Copy `.env.example` to `.env` and edit locally before running `docker compose up -d`.
 
-## Maintenance
+## Security and exposure
 
-- Use `update.sh` in the repo root to update Pi-hole on an existing host.  
-- Periodically review `ARCHITECTURE.md` and this README when you change ports, domains, or add new services.[web:44]  
-- Keep `.env.example` in sync with actual variables so a new host can be configured with minimal surprises.[web:41]
+- This stack is designed for **LAN-only** access by default.
+- Do not expose:
+  - Pi-hole admin ports (for example `8081`/`8444`)
+  - Nextcloud AIO admin port (for example `8080`)
+  directly to the internet.
+- If you plan to expose `https://your.cloud.name` publicly, consider:
+  - Using a proper public domain and trusted certificate.
+  - Placing a firewall or reverse proxy in front of the host.
+  - Applying Nextcloud hardening recommendations.
 
-## Future work
+## Troubleshooting
 
-Planned improvements include:[web:41]
+Common issues you may encounter:
 
-- More detailed Nextcloud deployment docs under `nextcloud/` (storage layout, backups, SSL/TLS notes).  
-- A dedicated infra documentation repo (`infra/`) describing the full home lab topology (hosts, networks, VPNs).[web:43]  
-- Integrated monitoring (for example Netdata, Uptime Kuma) and CI checks that validate DNS records, container health, and basic Nextcloud connectivity on each deploy.[web:47]
+- Docker pulls failing when DNS is misconfigured.
+- Local domain not resolving correctly (Pi-hole record missing or clients not using Pi-hole).
+- Caddy restarting in a loop due to an invalid `Caddyfile`.
+
+Useful diagnostics:
+
+```bash
+# DNS and host resolution
+dig your.cloud.name +short
+ping -c 1 your.cloud.name
+getent hosts your.cloud.name
+
+# Port and service checks
+ss -ltnp
+docker ps
+docker logs caddy --tail 50
+```
+
+If something breaks, check:
+
+- That Pi-hole is up and you are using **Pi-hole IP** for DNS.
+- That `your.cloud.name` resolves to **Host IP**.
+- That the Caddyfile matches your actual Nextcloud/Talk/Collabora ports.
