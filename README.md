@@ -142,6 +142,73 @@ To build the full Pi-hole + Nextcloud + reverse proxy stack on a new machine, us
 | `README.md`       | Overview and quick-start guide (this file).                                |
 | `update.sh`       | Script to update the Pi-hole stack on an existing host.                    |
 
+
+## Architecture diagram
+
+```mermaid
+graph LR
+  subgraph LAN
+    Client1[Client 1]
+    Client2[Client 2]
+    Router[Router / Switch]
+  end
+
+  subgraph Host["Linux host (Docker)"]
+    PiHole[Pi-hole\nDNS / Ad-blocker]
+    Caddy[Caddy\nReverse Proxy]
+    NextcloudAIO[Nextcloud AIO\nApache + PHP]
+    TalkHPB[Nextcloud Talk HPB\n(standalone-signaling)]
+    Collabora[Collabora Online]
+  end
+
+  %% Client traffic
+  Client1 --> Router
+  Client2 --> Router
+  Router --> PiHole
+
+  %% DNS resolution
+  PiHole --> Router
+  Router --> Client1
+  Router --> Client2
+
+  %% HTTP(S) traffic
+  Client1 --> Caddy
+  Client2 --> Caddy
+
+  %% Reverse proxy routes
+  Caddy --> NextcloudAIO
+  Caddy --> TalkHPB
+  Caddy --> Collabora
+```
+
+This uses Mermaid’s `graph` syntax and will render on GitHub as an inline diagram showing your stack.[web:182][web:181]
+
+Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
+
+---
+
+## 2. Stage, commit, and push
+
+```bash
+git add README.md
+git commit -m "docs: add architecture diagram with Mermaid"
+git push
+```
+
+---
+
+## 3. Verify the diagram on GitHub
+
+Go to your repo page:
+
+```text
+https://github.com/Deluk47/nextcloud-pihole-selfhosted
+```
+
+GitHub will render the Mermaid block under “Architecture diagram” with a visual graph.[web:182][web:187]
+
+If you’d like, we can refine the diagram further (e.g., label ports, add Host IP / Pi-hole IP, or separate subgraphs for “internal-only” vs “exposed”) while keeping it readable.
+
 ## Role in the home lab
 
 Within the wider home lab, this stack:[web:46]
