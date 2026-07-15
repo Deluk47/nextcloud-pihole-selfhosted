@@ -24,7 +24,7 @@ services:
       - AIO_ADDITIONAL_HOSTS=${NEXTCLOUD_DOMAIN}:${NEXTCLOUD_HOST_IP}
 
     extra_hosts:
-      - "nextcloud.local.cloud:192.168.0.53"
+      - "${NEXTCLOUD_DOMAIN}:${NEXTCLOUD_HOST_IP}"
 
     dns:
       - 1.1.1.1

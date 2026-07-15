@@ -2,21 +2,23 @@
     local_certs
 }
 
-# Caddy reads the environment variable from your ignored .env file automatically
 {$NEXTCLOUD_DOMAIN} {
     tls internal
 
+    # Nextcloud Talk (HPB / Signaling)
     handle_path /standalone-signaling/* {
-        reverse_proxy 127.0.0.1:3479 {
+        reverse_proxy nextcloud-aio-talk:3479 {
             flush_interval -1
         }
     }
 
+    # Collabora Online / Office
     handle /cool/* {
-        reverse_proxy 127.0.0.1:9980
+        reverse_proxy nextcloud-aio-collabora:9980
     }
 
+    # Main Nextcloud Web Server
     handle {
-        reverse_proxy 127.0.0.1:11000
+        reverse_proxy nextcloud-aio-apache:11000
     }
 }

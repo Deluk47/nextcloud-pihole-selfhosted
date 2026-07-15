@@ -5,8 +5,11 @@ services:
     image: caddy:alpine
     restart: always
     container_name: caddy
-    network_mode: "host"
-
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - nextcloud-aio
     env_file:
       - .env
     volumes:
@@ -15,6 +18,10 @@ services:
       - caddy_data:/data
       - caddy_sites:/srv
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+networks:
+  nextcloud-aio:
+    external: true
 
 volumes:
   caddy_certs:
