@@ -21,7 +21,7 @@ services:
       - './etc-dnsmasq.d:/etc/dnsmasq.d'
 
     dns:
-      - 127.0.0.1
+      - 8.8.8.8
       - 1.1.1.1
 
     restart: unless-stopped

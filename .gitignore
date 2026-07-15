@@ -1,5 +1,20 @@
+# Ignore all private environmental variables
+*.env
+.env
+.env.*
+
+# Ignore active configuration runtime data directories
+**/data/
+**/config/
+**/certs/
+**/srv/
+
+# Ignore system files
+.DS_Store
+*.log
+
+# Explicitly block active Pi-hole runtime data mounts
+**/etc-pihole/
+**/etc-dnsmasq.d/
 pihole/etc-pihole/
 pihole/etc-dnsmasq.d/
-nextcloud/volumes/
-.env
-nextcloud/composeORG.yaml

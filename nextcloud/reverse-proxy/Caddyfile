@@ -2,19 +2,21 @@
     local_certs
 }
 
-nextcloud.local.cloud:443 {
+# Caddy reads the environment variable from your ignored .env file automatically
+{$NEXTCLOUD_DOMAIN} {
     tls internal
 
-    # High-performance backend signaling
     handle_path /standalone-signaling/* {
         reverse_proxy 127.0.0.1:3479 {
             flush_interval -1
         }
     }
 
-    # Collabora
-    reverse_proxy /cool/* 127.0.0.1:11000
+    handle /cool/* {
+        reverse_proxy 127.0.0.1:9980
+    }
 
-    # Everything else to Nextcloud AIO Apache
-    reverse_proxy 127.0.0.1:11000
+    handle {
+        reverse_proxy 127.0.0.1:11000
+    }
 }
