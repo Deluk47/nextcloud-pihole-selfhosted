@@ -5,20 +5,20 @@
 {$NEXTCLOUD_DOMAIN} {
     tls internal
 
-    # Nextcloud Talk (HPB / Signaling)
+    # Nextcloud main app
+    handle {
+        reverse_proxy 127.0.0.1:11000
+    }
+
+    # Talk HPB
     handle_path /standalone-signaling/* {
-        reverse_proxy nextcloud-aio-talk:3479 {
+        reverse_proxy 127.0.0.1:3479 {
             flush_interval -1
         }
     }
 
-    # Collabora Online / Office
+    # Collabora
     handle /cool/* {
-        reverse_proxy nextcloud-aio-collabora:9980
-    }
-
-    # Main Nextcloud Web Server
-    handle {
-        reverse_proxy nextcloud-aio-apache:11000
+        reverse_proxy 127.0.0.1:9980
     }
 }
