@@ -25,27 +25,25 @@ Because Nextcloud AIO manages its own internal ecosystem of containers via a mas
 
 ---
 
-## Technical Constraints & Findings
+## Technical Architecture & Constraints
 
 During deployment, several critical networking constraints were identified and resolved:
 
-1. **Host Network Mode Limitation:** Caddy is configured with `network_mode: "host"`. While this allows it to bind cleanly to the physical machine's ports `80` and `443` without bridge interference, it breaks standard Docker internal DNS naming resolution. Caddy **cannot** resolve backends using container names like `http://nextcloud-aio-apache`. It must point to the loopback interface (`127.0.0.1`).
-2. **Docker Compose Port Binding Conflict:** When using `network_mode: "host"`, declaring a `ports:` block in `compose.yaml` creates a configuration conflict that causes the Caddy container to enter a continuous crash loop. The `ports:` block must be entirely removed.
-3. **Nextcloud AIO Apache Port Exposure:** By default, Nextcloud AIO isolates its Apache container. It must be explicitly forced to bind to the host's loopback interface using `APACHE_IP_BINDING=127.0.0.1` so the host-mode proxy can find it.
-4. **Internal TLS Generation:** To run entirely locally without exposing ports to the public internet for Let's Encrypt validation, the global option `{ local_certs }` combined with `tls internal` forces Caddy to operate its own internal Certificate Authority (CA).
-5. **Host OS Firewall Blocking:** Because Caddy runs in host network mode, traffic hitting the physical interface on ports `80` and `443` will be dropped by default if a host-level firewall (like UFW) is enabled. Explicit firewall allow rules are required.
+* **Host Network Mode Limitation:** Caddy uses `network_mode: "host"`. This binds it directly to host ports `80` and `443` without bridge network layers. Because this disables internal Docker DNS resolution, Caddy **cannot** resolve backends via container names; it must route to the loopback interface (`127.0.0.1`).
+* **Docker Compose Constraint:** Declaring a `ports:` block while using `network_mode: "host"` creates a configuration conflict causing continuous container crashes. The `ports:` block must be entirely omitted.
+* **Apache Isolation:** Nextcloud AIO isolates its Apache web endpoint by default. You must pass `APACHE_IP_BINDING=127.0.0.1` to force it to bind to the host loopback interface where Caddy can locate it.
+* **Internal TLS:** To maintain local operations without opening public internet ports for Let's Encrypt validation, the global option `{ local_certs }` combined with `tls internal` forces Caddy to issue its own self-signed certificates.
+* **QUIC Tuning (HTTP/3):** Caddy utilizes QUIC over UDP. Standard Linux kernel receive/send buffers (208 KiB) cause packet drops under high-bandwidth transfers. The host parameters must be tuned to 7.5 MB (`net.core.rmem_max=7500000`) to prevent warnings.
+* **Read-Only Volume Mismatch:** Because the `Caddyfile` is mounted as a read-only volume (`:ro`), the standard container hot-formatting command (`caddy fmt --overwrite`) fails. Formatting operations must be offloaded on the host layer using standard input (`stdin`) data piping.
 
 ---
 
-## Configuration Files
+## Configuration Blueprints
 
 ### 1. Environmental Variables (`.env`)
-The core environment parameters defining the Apache interface mappings:
-
 ```env
-NEXTCLOUD_DOMAIN=yourcloud.home.arpa
-NEXTCLOUD_HOST_IP=xxx.xxx.xxx.xxx
-
+NEXTCLOUD_DOMAIN=your-server-domain
+NEXTCLOUD_HOST_IP=your-server-ip
 APACHE_PORT=11000
 APACHE_IP_BINDING=127.0.0.1
 SKIP_DOMAIN_VALIDATION=true
@@ -53,39 +51,36 @@ TALK_PORT=3479
 COLLABORA_SECCOMP_DISABLED=true
 ```
 
-### 2. Caddyfile Proxy Rules (`reverse-proxy/Caddyfile`)
-The explicit layout mapping domain headers to backend loopback listeners:
-
+### 2. Reverse Proxy Map (`Caddyfile`)
 ```caddy
 {
-    local_certs
+	local_certs
 }
 
-yourcloud.home.arpa {
-    tls internal
+your-server-domain {
+	tls internal
 
-    # High-performance backend signaling (Nextcloud Talk)
-    handle_path /standalone-signaling/* {
-        reverse_proxy 127.0.0.1:3479 {
-            flush_interval -1
-        }
-    }
+	# High-performance backend signaling (Nextcloud Talk)
+	handle_path /standalone-signaling/* {
+		reverse_proxy 127.0.0.1:3479 {
+			flush_interval -1
+		}
+	}
 
-    # Collabora Online Office Suite
-    handle /cool/* {
-        reverse_proxy 127.0.0.1:9980
-    }
+	# Collabora Online Office Suite
+	handle /cool/* {
+		reverse_proxy 127.0.0.1:9980
+	}
 
-    # Main Nextcloud AIO Apache Endpoint (Catch-all)
-    handle {
-        reverse_proxy 127.0.0.1:11000
-    }
+	# Main Nextcloud AIO Apache Endpoint (Catch-all)
+	handle {
+		reverse_proxy 127.0.0.1:11000
+	}
 }
 ```
+---
 
-### 3. Docker Compose (`reverse-proxy/compose.yaml`)
-Note the removal of the `ports:` mapping section to comply with host network mode constraints:
-
+### 3. Container Orchestration Stack (`compose.yaml`)
 ```yaml
 version: "3.9"
 
@@ -113,46 +108,87 @@ volumes:
 
 ---
 
-## Operational Troubleshooting & Runbook
+## Chronological Deployment Runbook
 
-### Adjusting Host Firewall (`ERR_CONNECTION_TIMED_OUT`)
-If network requests to the proxy time out despite successful ping responses, allow the incoming traffic through the host OS firewall:
-
+### Stage 1: Optimize Host Kernel Network Buffers
+Run these commands on your host server terminal to lift system UDP performance ceilings:
 ```bash
-# For UFW (Ubuntu/Debian)
+# Apply changes immediately to the live host
+sudo sysctl -w net.core.rmem_max=7500000
+sudo sysctl -w net.core.wmem_max=7500000
+
+# Persist settings across system reboots
+sudo tee -a /etc/sysctl.conf << 'EOF'
+net.core.rmem_max=7500000
+net.core.wmem_max=7500000
+EOF
+```
+
+### Stage 2: Configure the Host OS Firewall
+Open standard ingress web listeners to ensure the proxy is reachable:
+```bash
+# Permit inbound connections over web interfaces via UFW
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw reload
 
-# Verify ports are actively listening on the host network interfaces
+# Confirm host network interfaces are listening actively on destination sockets
 sudo ss -tulpn | grep -E '(:80|:443)'
 ```
 
-### Resetting Nextcloud Administrative Credentials
-If you encounter a "Wrong login or password" failure on the admin account, reset the credentials via the Docker CLI container wrapper:
-
+### Stage 3: Sanitize Configuration Layout
+Navigate to your proxy configuration workspace directory and fix any text alignment inconsistencies safely via standard input streaming:
 ```bash
-docker exec --user www-data -it nextcloud-aio-nextcloud php occ user:resetpassword admin
+cd ~/nextcloud-pihole-selfhosted/nextcloud/reverse-proxy
+caddy fmt - < Caddyfile > Caddyfile.tmp && mv Caddyfile.tmp Caddyfile
 ```
 
-### Resolving Port Collisions (HTTP 502 / Bind Failures)
-Nextcloud AIO spawns a transient service called `nextcloud-aio-domaincheck`. If a brute-force global restart is initiated via Docker CLI, this diagnostic tool will conflict with Apache on port `11000`, creating a binding failure loop. 
-
-To clear port locks, force a clean stack recreation using:
+### Stage 4: Initialize the Caddy Proxy Service
+Deploy the stack and confirm the engine state:
 ```bash
-# 1. Purge the diagnostic checker block
+# Fire up the stack in a detached background state
+sudo docker compose up -d
+
+# Verify initialization and check for errors
+sudo docker logs caddy
+
+# Validate the config layout parsing internally
+sudo docker exec -it caddy caddy validate --config /etc/caddy/Caddyfile
+```
+
+---
+
+## Operational Troubleshooting Runbook
+
+### Live Hot-Reloading Configuration Updates
+If you alter your proxy rules in the `Caddyfile` later, apply changes immediately without dropping active sessions:
+```bash
+sudo docker exec -it caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+### Resolving Port 11000 Collisions (HTTP 502 Loops)
+Nextcloud AIO spawns a temporary service called `nextcloud-aio-domaincheck`. If a global restart is forced, this tool conflicts with Apache on port `11000`, putting the stack in a binding failure loop. Use this sequence to clean up the network paths:
+```bash
+# 1. Force purge the transient diagnostic container
 docker rm -f nextcloud-aio-domaincheck
 
-# 2. Force rebuild the active Nextcloud containers
+# 2. Force recreate the core application containers
 cd ~/nextcloud-pihole-selfhosted/nextcloud
 docker compose up -d --force-recreate
 
-# 3. Recycle the Caddy daemon
+# 3. Recycle the reverse proxy deployment
 cd ~/nextcloud-pihole-selfhosted/reverse-proxy
 docker compose down && docker compose up -d
 ```
 
-### Accessing the Web UI
-Because Caddy operates via self-signed tokens (`tls internal`), web browsers will trigger an untrusted certificate caution warning (`NET::ERR_CERT_AUTHORITY_INVALID`). 
-* **Bypass:** Select **Advanced** -> **Proceed to yourcloud.home.arpa (unsafe)**.
-* Always clear the browser cache or use an **Incognito Window** if shifting between HTTP/HTTPS blocks to avoid HSTS routing errors.
+### Resetting Forgotten Nextcloud Administrative Credentials
+If you encounter a "Wrong login or password" error on your admin account, force a credential baseline shift via the command-line interface:
+```bash
+docker exec --user www-data -it nextcloud-aio-nextcloud php occ user:resetpassword admin
+```
+
+### Web Browser Security Warnings
+Because Caddy operates via self-signed tokens (`tls internal`), web browsers will present an untrusted certificate error (`NET::ERR_CERT_AUTHORITY_INVALID`). 
+* **Bypass:** Select **Advanced** -> **Proceed to your-server-domain (unsafe)**.
+* **Cache Management:** Use an **Incognito / Private Window** when shifting proxy configurations to prevent browser-enforced HSTS routing loops from masking connectivity problems.
+
