@@ -65,51 +65,40 @@ These records allow clients to reach services by stable hostnames rather than ra
 
 ```mermaid
 flowchart LR
-  subgraph LAN
-    Client1[Client 1]
-    Client2[Client 2]
-    Router[Router / Switch]
-  end
+  Client1[Client 1]
+  Client2[Client 2]
+  Router[Router / Switch]
 
-  subgraph Host[Linux host running Docker]
-    subgraph PiHoleGroup[Pi-hole container]
-      PiDNS[DNS\n53/tcp, 53/udp]
-      PiWeb[Web UI\n:8081 / :8444 -> 80/443]
-    end
+  PiDNS[Pi-hole DNS 53/tcp, 53/udp]
+  PiWeb[Pi-hole Admin 8081/8444]
 
-    subgraph CaddyGroup[Caddy reverse proxy]
-      Caddy80[HTTP\n:80]
-      Caddy443[HTTPS\n:443]
-    end
+  Caddy80[Caddy HTTP 80]
+  Caddy443[Caddy HTTPS 443]
 
-    subgraph NCGroup[Nextcloud AIO containers]
-      NCApache[Nextcloud Apache\n127.0.0.1:11000]
-      TalkHPB[Talk HPB\n127.0.0.1:3479]
-      Collabora[Collabora\n127.0.0.1:9980]
-    end
-  end
+  NCApache[Nextcloud Apache 11000]
+  TalkHPB[Talk HPB 3479]
+  Collabora[Collabora 9980]
 
-  %% Client DNS queries
-  Client1 -->|DNS (53)| Router
-  Client2 -->|DNS (53)| Router
-  Router -->|DNS (53)| PiDNS
-
-  %% Client HTTP(S) traffic
-  Client1 -->|HTTPS 443: your.cloud.name| Caddy443
-  Client2 -->|HTTPS 443: your.cloud.name| Caddy443
-
-  %% HTTP redirect / plaintext if used
-  Client1 -->|HTTP 80| Caddy80
-  Caddy80 -->|Redirect to 443| Caddy443
-
-  %% Caddy upstreams
-  Caddy443 -->|/ -> 127.0.0.1:11000| NCApache
-  Caddy443 -->|/standalone-signaling/* -> 127.0.0.1:3479| TalkHPB
-  Caddy443 -->|/cool/* -> 127.0.0.1:9980| Collabora
+  %% DNS path
+  Client1 --> Router
+  Client2 --> Router
+  Router --> PiDNS
 
   %% Admin access (optional)
-  Client1 -->|HTTP 8081| PiWeb
-  Client1 -->|HTTPS 8444| PiWeb
+  Client1 --> PiWeb
+
+  %% HTTP(S) traffic to Caddy
+  Client1 --> Caddy80
+  Client1 --> Caddy443
+  Client2 --> Caddy443
+
+  %% Redirect from 80 to 443
+  Caddy80 --> Caddy443
+
+  %% Caddy upstreams
+  Caddy443 --> NCApache
+  Caddy443 --> TalkHPB
+  Caddy443 --> Collabora
 ```
 
 Reading the diagram:
@@ -117,7 +106,8 @@ Reading the diagram:
 - Clients use Pi-hole for DNS lookups.
 - `your.cloud.name` resolves to **Host IP**.
 - Clients connect to Caddy on ports 80/443.
-- Caddy proxies traffic to the appropriate internal service based on path and hostname.
+- Caddy proxies traffic to the appropriate internal service based on the path and hostname.
+- Pi-hole’s web UI is reachable on the mapped admin ports (e.g. 8081/8444).
 
 ## Data and request flow
 
