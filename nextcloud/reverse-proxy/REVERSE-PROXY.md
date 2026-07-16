@@ -1,49 +1,69 @@
 # Local Reverse Proxy Configuration (Caddy Host-Mode)
 
-This document outlines the architecture, networking decisions, and configurations used to expose the self-hosted Nextcloud All-in-One (AIO) instance securely over the local Proxmox network using **Caddy** running in **Host Network Mode**.
+This document describes how Caddy is used as a local reverse proxy to expose a self-hosted Nextcloud All-in-One (AIO) instance over the Proxmox LAN. Caddy runs in **host network mode** and terminates TLS locally using an internal CA. [web:229][web:232]
 
-## Architecture & Network Flow
+---
 
-Because Nextcloud AIO manages its own internal ecosystem of containers via a master supervisor, standard Docker bridge networks present routing layers. The final operational traffic routing flow is established as follows:
+## 1. Architecture and traffic flow
+
+Nextcloud AIO manages its own internal ecosystem of containers via a master supervisor, which makes traditional bridge-network-based reverse proxy setups awkward. The final routing flow is:
 
 ```text
 [ Client Browser ]
-        │ (https://yourcloud.home.arpa)
+        │ (https://your-server-domain)
         ▼
-[ Pi-hole Local DNS ] ──( Resolves domain to )──► [ Proxmox Server IP ]
-                                                                 │
-                                                       (Host Firewall: UFW)
-                                                                 │ (Passes Ports 80/443)
-                                                                 ▼
-                                              [ Caddy Container (network_mode: host) ]
-                                                                 │
-                                                       (Decrypts TLS internal)
-                                                       (Proxies via 127.0.0.1)
-                                                                 ▼
-                                              [ Nextcloud AIO Apache Container ]
+[ Pi-hole Local DNS ] ──( Resolves domain to )──► [ Proxmox / Caddy Host IP ]
+                                                          │
+                                                (Host Firewall: UFW)
+                                                          │ (Allows 80/443)
+                                                          ▼
+                                    [ Caddy Container (network_mode: host) ]
+                                                          │
+                                                (Terminates TLS locally)
+                                                (Proxies to 127.0.0.1)
+                                                          ▼
+                                    [ Nextcloud AIO Apache Container ]
 ```
 
----
+Key points:
 
-## Technical Architecture & Constraints
-
-During deployment, several critical networking constraints were identified and resolved:
-
-* **Host Network Mode Limitation:** Caddy uses `network_mode: "host"`. This binds it directly to host ports `80` and `443` without bridge network layers. Because this disables internal Docker DNS resolution, Caddy **cannot** resolve backends via container names; it must route to the loopback interface (`127.0.0.1`).
-* **Docker Compose Constraint:** Declaring a `ports:` block while using `network_mode: "host"` creates a configuration conflict causing continuous container crashes. The `ports:` block must be entirely omitted.
-* **Apache Isolation:** Nextcloud AIO isolates its Apache web endpoint by default. You must pass `APACHE_IP_BINDING=127.0.0.1` to force it to bind to the host loopback interface where Caddy can locate it.
-* **Internal TLS:** To maintain local operations without opening public internet ports for Let's Encrypt validation, the global option `{ local_certs }` combined with `tls internal` forces Caddy to issue its own self-signed certificates.
-* **QUIC Tuning (HTTP/3):** Caddy utilizes QUIC over UDP. Standard Linux kernel receive/send buffers (208 KiB) cause packet drops under high-bandwidth transfers. The host parameters must be tuned to 7.5 MB (`net.core.rmem_max=7500000`) to prevent warnings.
-* **Read-Only Volume Mismatch:** Because the `Caddyfile` is mounted as a read-only volume (`:ro`), the standard container hot-formatting command (`caddy fmt --overwrite`) fails. Formatting operations must be offloaded on the host layer using standard input (`stdin`) data piping.
+- Pi-hole resolves `your-server-domain` to the Proxmox host running Caddy. [web:225]  
+- Caddy binds directly to host ports 80 and 443 via host network mode. [web:238]  
+- Caddy proxies HTTP requests to Nextcloud AIO’s Apache service bound on `127.0.0.1:11000`. [web:235]  
 
 ---
 
-## Configuration Blueprints
+## 2. Technical constraints and decisions
 
-### 1. Environmental Variables (`.env`)
+Several important constraints shape this configuration:
+
+- **Host network mode:**  
+  `network_mode: "host"` binds Caddy directly to the host’s network stack on ports 80 and 443. Docker DNS-based service discovery is not available, so Caddy must route to explicit IPs (here, `127.0.0.1`). [web:238]
+
+- **No `ports:` block with host mode:**  
+  Defining `ports:` while using `network_mode: "host"` causes configuration conflicts and container crashes; the `ports:` section must be omitted completely. [web:238]
+
+- **Apache IP binding:**  
+  Nextcloud AIO isolates its Apache endpoint. You must pass `APACHE_IP_BINDING=127.0.0.1` into the AIO configuration so Apache listens on the host loopback, where Caddy can reach it. [web:235]
+
+- **Internal TLS with Caddy:**  
+  For a purely local deployment (no public DNS / ACME), the Caddy global option `{ local_certs }` combined with `tls internal` configures Caddy to issue certificates via its own internal CA. [web:229][web:232]
+
+- **HTTP/3 / QUIC tuning:**  
+  Caddy can serve HTTP/3 over UDP. Under high-bandwidth transfers, default Linux UDP buffers may be too small, leading to warnings and reduced throughput. Raising `net.core.rmem_max` and `net.core.wmem_max` mitigates this. [web:233]
+
+- **Read-only Caddyfile mount:**  
+  Because `Caddyfile` is mounted read-only (`:ro`), `caddy fmt --overwrite` inside the container fails. Formatting is done on the host using stdin/stdout instead.
+
+---
+
+## 3. Environment variables (`.env`)
+
+Example `.env` for the reverse proxy:
+
 ```env
-NEXTCLOUD_DOMAIN=your-server-domain
-NEXTCLOUD_HOST_IP=your-server-ip
+NEXTCLOUD_DOMAIN=your-server-domain     # e.g. cloud.home.arpa
+NEXTCLOUD_HOST_IP=your-server-ip        # e.g. 192.168.0.50 (Caddy/Proxmox host)
 APACHE_PORT=11000
 APACHE_IP_BINDING=127.0.0.1
 SKIP_DOMAIN_VALIDATION=true
@@ -51,7 +71,17 @@ TALK_PORT=3479
 COLLABORA_SECCOMP_DISABLED=true
 ```
 
-### 2. Reverse Proxy Map (`Caddyfile`)
+Notes:
+
+- `NEXTCLOUD_DOMAIN` must match the hostname Pi-hole resolves to the Caddy host. [web:225]  
+- `APACHE_IP_BINDING=127.0.0.1` is applied on the Nextcloud AIO side so that Apache listens on loopback. [web:235]  
+
+---
+
+## 4. Caddy configuration (`Caddyfile`)
+
+Minimal Caddyfile for this setup:
+
 ```caddy
 {
 	local_certs
@@ -60,27 +90,33 @@ COLLABORA_SECCOMP_DISABLED=true
 your-server-domain {
 	tls internal
 
-	# High-performance backend signaling (Nextcloud Talk)
+	# Nextcloud Talk standalone signaling
 	handle_path /standalone-signaling/* {
 		reverse_proxy 127.0.0.1:3479 {
 			flush_interval -1
 		}
 	}
 
-	# Collabora Online Office Suite
+	# Collabora Online office suite
 	handle /cool/* {
 		reverse_proxy 127.0.0.1:9980
 	}
 
-	# Main Nextcloud AIO Apache Endpoint (Catch-all)
+	# Main Nextcloud AIO Apache endpoint (catch-all)
 	handle {
 		reverse_proxy 127.0.0.1:11000
 	}
 }
 ```
+
+Replace `your-server-domain` with the same value you use for `NEXTCLOUD_DOMAIN` and in Pi-hole’s local DNS record. [web:229][web:232]
+
 ---
 
-### 3. Container Orchestration Stack (`compose.yaml`)
+## 5. Container stack (`compose.yaml`)
+
+Caddy runs in host network mode and uses named volumes for configuration and certificate storage:
+
 ```yaml
 version: "3.9"
 
@@ -106,89 +142,127 @@ volumes:
   caddy_sites:
 ```
 
+Caddy’s internal CA root certificate is stored under its data directory; trusting this root on client devices can remove browser warnings, if desired. [web:232]
+
 ---
 
-## Chronological Deployment Runbook
+## 6. Deployment runbook
 
-### Stage 1: Optimize Host Kernel Network Buffers
-Run these commands on your host server terminal to lift system UDP performance ceilings:
+### 6.1 Tune host UDP buffers (optional but recommended)
+
+On the Caddy host, increase UDP buffer sizes:
+
 ```bash
-# Apply changes immediately to the live host
+# Apply immediately
 sudo sysctl -w net.core.rmem_max=7500000
 sudo sysctl -w net.core.wmem_max=7500000
 
-# Persist settings across system reboots
+# Persist across reboots
 sudo tee -a /etc/sysctl.conf << 'EOF'
 net.core.rmem_max=7500000
 net.core.wmem_max=7500000
 EOF
 ```
 
-### Stage 2: Configure the Host OS Firewall
-Open standard ingress web listeners to ensure the proxy is reachable:
+### 6.2 Open firewall ports
+
+Ensure the host firewall allows HTTP and HTTPS:
+
 ```bash
-# Permit inbound connections over web interfaces via UFW
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw reload
 
-# Confirm host network interfaces are listening actively on destination sockets
 sudo ss -tulpn | grep -E '(:80|:443)'
 ```
 
-### Stage 3: Sanitize Configuration Layout
-Navigate to your proxy configuration workspace directory and fix any text alignment inconsistencies safely via standard input streaming:
+### 6.3 Format and validate `Caddyfile`
+
+From the reverse proxy directory:
+
 ```bash
 cd ~/nextcloud-pihole-selfhosted/nextcloud/reverse-proxy
 caddy fmt - < Caddyfile > Caddyfile.tmp && mv Caddyfile.tmp Caddyfile
 ```
 
-### Stage 4: Initialize the Caddy Proxy Service
-Deploy the stack and confirm the engine state:
+---
+
+### 6.4 Start Caddy
+
 ```bash
-# Fire up the stack in a detached background state
+cd ~/nextcloud-pihole-selfhosted/nextcloud/reverse-proxy
+
+# Start in background
 sudo docker compose up -d
 
-# Verify initialization and check for errors
+# Check logs
 sudo docker logs caddy
 
-# Validate the config layout parsing internally
+# Validate config inside the container
 sudo docker exec -it caddy caddy validate --config /etc/caddy/Caddyfile
 ```
 
+If validation fails, fix the Caddyfile and re-run `caddy validate` before reloading. [web:236]
+
 ---
 
-## Operational Troubleshooting Runbook
+## 7. Runtime operations and troubleshooting
 
-### Live Hot-Reloading Configuration Updates
-If you alter your proxy rules in the `Caddyfile` later, apply changes immediately without dropping active sessions:
+### 7.1 Hot-reload configuration
+
+After editing `Caddyfile` on the host:
+
 ```bash
 sudo docker exec -it caddy caddy reload --config /etc/caddy/Caddyfile
 ```
 
-### Resolving Port 11000 Collisions (HTTP 502 Loops)
-Nextcloud AIO spawns a temporary service called `nextcloud-aio-domaincheck`. If a global restart is forced, this tool conflicts with Apache on port `11000`, putting the stack in a binding failure loop. Use this sequence to clean up the network paths:
+This reloads configuration without dropping active connections. [web:236]
+
+---
+
+### 7.2 Resolving port 11000 conflicts (HTTP 502)
+
+Nextcloud AIO may start a temporary container called `nextcloud-aio-domaincheck` that also tries to use port `11000`, causing binding failures for Apache and resulting in 502 errors via Caddy. A typical recovery sequence:
+
 ```bash
-# 1. Force purge the transient diagnostic container
+# 1. Remove the transient diagnostic container
 docker rm -f nextcloud-aio-domaincheck
 
-# 2. Force recreate the core application containers
+# 2. Recreate core Nextcloud containers
 cd ~/nextcloud-pihole-selfhosted/nextcloud
 docker compose up -d --force-recreate
 
-# 3. Recycle the reverse proxy deployment
-cd ~/nextcloud-pihole-selfhosted/reverse-proxy
-docker compose down && docker compose up -d
+# 3. Restart the reverse proxy
+cd ~/nextcloud-pihole-selfhosted/nextcloud/reverse-proxy
+docker compose down
+docker compose up -d
 ```
 
-### Resetting Forgotten Nextcloud Administrative Credentials
-If you encounter a "Wrong login or password" error on your admin account, force a credential baseline shift via the command-line interface:
+---
+
+### 7.3 Resetting Nextcloud admin password
+
+If you cannot log in to Nextcloud with the admin account:
+
 ```bash
 docker exec --user www-data -it nextcloud-aio-nextcloud php occ user:resetpassword admin
 ```
 
-### Web Browser Security Warnings
-Because Caddy operates via self-signed tokens (`tls internal`), web browsers will present an untrusted certificate error (`NET::ERR_CERT_AUTHORITY_INVALID`). 
-* **Bypass:** Select **Advanced** -> **Proceed to your-server-domain (unsafe)**.
-* **Cache Management:** Use an **Incognito / Private Window** when shifting proxy configurations to prevent browser-enforced HSTS routing loops from masking connectivity problems.
+Follow the prompts to set a new password, then log in through the Caddy HTTPS endpoint. [web:238]
 
+---
+
+### 7.4 Browser certificate warnings
+
+Because this setup uses `tls internal` and `{ local_certs }`, browsers will initially treat the certificate as untrusted. [web:229][web:232]
+
+Options:
+
+- **Quick bypass (testing):**  
+  Use the browser’s “Advanced → Proceed to site” option on `https://your-server-domain`.  
+
+- **Cleaner approach:**  
+  - Export the Caddy local CA root certificate from the Caddy data directory (inside the container or mapped volume). [web:232]  
+  - Import it into the trust store of your client devices so that `your-server-domain` is trusted.  
+
+When changing proxy configuration, testing in an incognito/private window avoids issues with cached HSTS or old certificate chains.
