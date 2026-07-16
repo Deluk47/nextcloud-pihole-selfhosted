@@ -1,25 +1,20 @@
 # Nextcloud Stack Deployment Guide (Self-Hosted)
 
-This guide describes how to deploy the Nextcloud stack defined in `nextcloud/` on an Ubuntu host, behind a reverse proxy, and integrated with a local DNS service (for example, Pi-hole).
+This guide describes how to deploy the Nextcloud stack in `nextcloud/` on an Ubuntu host, behind a local reverse proxy, and integrated with a LAN DNS service (for example, Pi-hole). It assumes you are using **Nextcloud All-in-One (AIO)** and a reverse proxy such as **Caddy**. [web:243][web:245]
 
 ---
 
-## Prerequisites
+## 1. Prerequisites
 
-- Ubuntu Server (Debian-based) with Docker and Docker Compose.
-- A local DNS solution (such as Pi-hole) capable of resolving internal hostnames to your Nextcloud server.
-- A reverse proxy (such as Caddy, Nginx, or Traefik) running on the same host or in the same Docker network to route HTTPS traffic to Nextcloud.
+- Ubuntu Server (Debian-based) with Docker Engine and Docker Compose installed.
+- A local DNS solution (such as Pi-hole) that can resolve a hostname (for example, `cloud.home.arpa`) to your Nextcloud server’s IP.
+- A reverse proxy (for example, Caddy) configured as described in `REVERSE-PROXY.md`, listening on ports 80/443 and forwarding to the Nextcloud AIO Apache port (for example, `127.0.0.1:11000`). [web:239][web:248]
 
 ---
 
-## Step 1: Review compose configuration
+## 2. Review `nextcloud/compose.yaml`
 
-The `nextcloud/compose.yaml` in this repository defines the Nextcloud stack. It might include:
-
-- A Nextcloud All-in-One (AIO) master container, or
-- Separate services for Nextcloud, database, caching, and related apps.
-
-Example (simplified pattern):
+The `nextcloud/compose.yaml` in this repository defines the Nextcloud AIO master container. A representative pattern looks like:
 
 ```yaml
 services:
@@ -37,131 +32,192 @@ volumes:
   nextcloud_aio_mastercontainer:
 ```
 
-Adjust this example to match your actual `compose.yaml` in the `nextcloud/` folder.
+In your actual `compose.yaml`, you may also pass environment variables such as:
+
+- `APACHE_PORT=11000` – the port Apache inside AIO listens on.  
+- `APACHE_IP_BINDING=127.0.0.1` – bind Apache to the host loopback for use with a local reverse proxy. [web:241][web:248]  
+- `SKIP_DOMAIN_VALIDATION=true` – when running AIO without public DNS/ACME. [web:244][web:247]  
+
+Adjust this example to match your actual `nextcloud/compose.yaml` file.
 
 ---
 
-## Step 2: Environment variables (optional but recommended)
+## 3. Environment variables for Nextcloud AIO
 
 If you use a `.env` file for the Nextcloud stack:
 
-1. Create `.env` from an example file:
+1. Create `.env` from the example file:
 
    ```bash
-   cd /path/to/nextcloud-pihole-selfhosted/nextcloud
+   cd ~/nextcloud-pihole-selfhosted/nextcloud
    cp .env.example .env
    ```
 
-2. Edit `.env` to set values such as:
+2. Edit `.env`:
 
-   - `NEXTCLOUD_DOMAIN` – a hostname you control on your LAN or public DNS (for example, `cloud.example.local`).
-   - `TZ` – your timezone.
-   - Database credentials or other internal secrets if not handled by Nextcloud AIO.
+   ```bash
+   nano .env
+   ```
 
-Ensure `.env` is listed in `.gitignore` so secrets are not committed.
+   Set values such as:
+
+   - `NEXTCLOUD_DOMAIN` – the hostname you will use via the reverse proxy (for example, `cloud.home.arpa`). [web:243]  
+   - `TZ` – your timezone (for example, `Europe/London`).  
+   - `APACHE_PORT` – the Apache port inside AIO (for example, `11000`) used by the reverse proxy. [web:248]  
+   - `APACHE_IP_BINDING` – typically `127.0.0.1` when AIO is behind a reverse proxy on the same host. [web:241]  
+   - `SKIP_DOMAIN_VALIDATION` – set to `true` if you follow the documented approach to skip AIO’s domain validation when using a purely local reverse proxy. [web:244][web:247]
+
+3. Ensure `.env` is ignored by Git:
+
+   ```bash
+   echo ".env" >> .gitignore
+   ```
 
 ---
 
-## Step 3: Configure the reverse proxy
+## 4. Configure the reverse proxy and DNS
 
-The `nextcloud/reverse-proxy/` directory contains configuration for your reverse proxy. A typical entry for Caddy (as an example) might look like:
+Follow `PIHOLE_DEPLOYMENT.md` and `REVERSE-PROXY.md` first so that:
 
-```caddyfile
-cloud.example.local {
-  tls internal
-  reverse_proxy nextcloud-aio-apache:11000
+- Pi-hole resolves `NEXTCLOUD_DOMAIN` (for example, `cloud.home.arpa`) to the Nextcloud host IP.
+- The reverse proxy (for example, Caddy) listens on 80/443 and forwards traffic to `127.0.0.1:11000` (Apache inside AIO). [web:239][web:245]
+
+Example Caddy snippet (for reference):
+
+```caddy
+cloud.home.arpa {
+	tls internal
+
+	# Nextcloud main endpoint
+	handle {
+		reverse_proxy 127.0.0.1:11000
+	}
 }
 ```
 
-Key ideas (regardless of proxy):
-
-- The proxy listens on ports 80/443 on the host.
-- It forwards traffic to the Nextcloud container by service name and port on the Docker network.
-- The hostname (`cloud.example.local` here) is resolved by your DNS solution to the server’s IP.
-
-Update the configuration files in `nextcloud/reverse-proxy/` so they match your actual service names, ports, and chosen hostname.
+The exact Caddyfile and deployment details are documented in `REVERSE-PROXY.md`.
 
 ---
 
-## Step 4: Start the Nextcloud stack from this repository
+## 5. Start the Nextcloud AIO stack
 
 From the unified repository:
 
 ```bash
-cd /path/to/nextcloud-pihole-selfhosted/nextcloud
+cd ~/nextcloud-pihole-selfhosted/nextcloud
 docker compose up -d
 ```
 
 Check that the containers are running:
 
 ```bash
-docker ps
+docker ps --filter "name=nextcloud-aio"
 ```
 
-The Nextcloud containers should show a status of `Up`. If you are using Nextcloud AIO, you may need to complete the initial setup through the AIO interface. [web:162][web:222][web:227]
+You should see entries such as:
+
+- `nextcloud-aio-mastercontainer`  
+- `nextcloud-aio-apache`  
+- other AIO-managed containers (database, redis, etc.) [web:243][web:248]
+
+If containers do not start, inspect logs:
+
+```bash
+docker logs nextcloud-aio-mastercontainer
+```
 
 ---
 
-## Step 5: Complete Nextcloud application setup
+## 6. Complete the AIO setup wizard
 
-Depending on your configuration:
-
-- For Nextcloud AIO:
-  - Visit the AIO setup interface using the mapped port from `compose.yaml` (for example, `https://<SERVER_IP>:8080`).
-  - Follow the wizard to set the domain, admin account, and optional apps. [web:162][web:222]
-
-- For a non-AIO stack:
-  - Access the web interface via your reverse proxy hostname (for example, `https://cloud.example.local`).
-  - Complete the initial Nextcloud installation (database connection, admin user creation, etc.). [web:228]
-
----
-
-## Step 6: Validate DNS and proxy integration
-
-With DNS and the reverse proxy configured:
-
-1. Confirm that your chosen hostname resolves to the server IP:
-
-   ```bash
-   dig cloud.example.local
-   ```
-
-   Replace `cloud.example.local` with your actual hostname.
-
-2. From a client device on the network, open:
+1. Access the AIO interface directly via the mapped port (default example):
 
    ```text
-   https://cloud.example.local
+   https://<SERVER_IP>:8080
+   ```
+
+2. In the AIO interface:
+
+   - Set the **domain** to your `NEXTCLOUD_DOMAIN` (for example, `cloud.home.arpa`).  
+   - Enable “reverse proxy mode” if prompted and ensure the Apache port matches `APACHE_PORT` (for example, `11000`). [web:239][web:248]  
+   - Create the initial admin user and choose any optional apps you want installed. [web:243]
+
+3. Start the stack from the AIO interface (if required). AIO will create and manage the internal containers.
+
+---
+
+## 7. Validate DNS and reverse proxy
+
+Once AIO is configured and the reverse proxy is running:
+
+1. From a LAN client using Pi-hole, confirm hostname resolution:
+
+   ```bash
+   dig cloud.home.arpa
+   ```
+
+   Replace with your actual `NEXTCLOUD_DOMAIN`. The answer should be the IP of your Nextcloud host. [web:245]
+
+2. In a browser on the same client, open:
+
+   ```text
+   https://cloud.home.arpa
    ```
 
 3. Verify that:
 
-   - DNS resolution is correct.
-   - The reverse proxy terminates TLS and forwards traffic to Nextcloud.
-   - The Nextcloud web interface loads and you can log in.
+   - The browser connects over HTTPS (you may see a warning if using an internal CA like Caddy’s `tls internal`). [web:229][web:232]  
+   - The request reaches the Nextcloud login page via the reverse proxy.  
+   - You can log in with the admin account created during the AIO setup. [web:243]
+
+If you receive 502 errors, consult `REVERSE-PROXY.md` (port conflicts, especially around `11000`, and AIO’s `nextcloud-aio-domaincheck` container are common culprits). [web:239][web:245]
 
 ---
 
-## Step 7: Operational tasks
+## 8. Routine operations
 
-To update the Nextcloud stack:
+### 8.1 Updating the Nextcloud AIO stack
+
+To update containers and configuration from this repository:
 
 ```bash
-cd /path/to/nextcloud-pihole-selfhosted/nextcloud
-git pull origin main   # if you are using this repo as the source of truth
+cd ~/nextcloud-pihole-selfhosted/nextcloud
+git pull origin main          # if this repo is your source of truth
 docker compose pull
 docker compose up -d
 ```
 
-To inspect logs for troubleshooting:
+AIO-managed updates may also be initiated from the AIO interface; follow the upstream AIO documentation for version-specific guidance. [web:243]
+
+### 8.2 Inspecting logs
+
+For the master container:
 
 ```bash
 docker logs nextcloud-aio-mastercontainer
-# or the specific Nextcloud service name used in your compose.yaml
 ```
 
-For backups:
+For the Apache container:
 
-- Use Nextcloud’s built-in backup tools, Nextcloud AIO backup features, or
-- Export/snapshot the data volumes and database using your preferred backup strategy. [web:226][web:228]
+```bash
+docker logs nextcloud-aio-apache
+```
 
+Check the reverse proxy logs (`caddy`, `nginx`, or `traefik`) if you see HTTP 502 or TLS-related issues. [web:239]
+
+---
+
+## 9. Backups and recovery
+
+At minimum, you should back up:
+
+- Nextcloud data volumes (user files).  
+- Database volumes (if using an external DB rather than AIO’s internal one).  
+- Nextcloud AIO configuration volumes (for example, `nextcloud_aio_mastercontainer`). [web:240][web:245]
+
+Options include:
+
+- Using Nextcloud AIO’s built-in Borg-based backup solution, following the official AIO documentation. [web:240]  
+- Using external tooling or scripted volume backups as described in `RESTORE.md` and `AUTOMATED-BACKUPS.md` in this repository.
+
+Test your restore process regularly on a non-production environment to ensure that you can recover the full Nextcloud stack and data if needed. [web:240]
